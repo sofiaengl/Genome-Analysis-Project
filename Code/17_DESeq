@@ -1,0 +1,151 @@
+### NOT FULL SCRIPT AS SOME WAS LOST, SOME PARTS ARE AI REGENERATED AND NOT WRITTEN BY THE AUTHOR!!! ###
+
+# Load libraries
+library(DESeq2)
+library(apeglm)
+library(pheatmap)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ggrepel)
+
+# Putting in the counts file
+BH <- read.delim("bh_counts.txt", header = FALSE, row.names = 1)
+
+# Read Serum counts
+Serum <- read.delim("serum_counts.txt", header = FALSE, row.names = 1)
+  
+# Remove HTSeq technical rows
+BH <- BH[!grepl("^__", rownames(BH)), ]
+Serum <- Serum[!grepl("^__", rownames(Serum)), ]
+
+counts <- cbind(BH, Serum)
+
+# Add sample names
+colnames(counts) <- c(
+    "BH_ERR1797972", "BH_ERR1797973", "BH_ERR1797974",
+    "serum_ERR1797969", "serum_ERR1797970", "serum_ERR1797971")
+  
+# Sample metadata
+sample_info <- data.frame(
+  row.names = colnames(counts),
+  condition = factor(c("BH", "BH", "BH", "serum", "serum", "serum")))
+
+# Set reference level
+sample_info$condition <- relevel(sample_info$condition, ref = "BH")
+  
+# Build DESeq dataset
+dds <- DESeqDataSetFromMatrix(
+  countData = counts,
+  colData = sample_info,
+  design = ~ condition)
+  
+# Pre-filter low counts
+dds <- dds[rowSums(counts(dds)) >= 10, ]
+  
+# Run DESeq2
+dds <- DESeq(dds)
+ 
+# Extract results
+res <- results(dds, contrast = c("condition", "serum", "BH"))
+res <- res[order(res$padj), ]
+  
+# Shrink log fold changes
+res_shrunk <- lfcShrink(
+  dds,
+  coef = "condition_serum_vs_BH",
+  type = "apeglm",
+  lfcThreshold = 1)
+ 
+# MA plot
+plotMA(res_shrunk, ylim = c(-4, 4))
+abline(h = c(-1, 1), col = "grey", lwd = 2)
+
+# Significant genes
+sig <- subset(res, padj < 0.001 & abs(log2FoldChange) > 1)
+  
+sig <- sig[order(sig$padj), ]
+  
+# VST transformation
+vsd <- vst(dds, blind = FALSE)
+  
+# Sample annotation
+df <- as.data.frame(colData(dds))
+
+# PCA
+plotPCA(vsd, intgroup = "condition")
+ 
+# Volcano plot
+res_df <- as.data.frame(res)
+res_df <- na.omit(res_df)
+  
+res_df$Significance <- "Not significant"
+res_df$Significance[res_df$padj < 0.001 & res_df$log2FoldChange > 1] <- "Upregulated"
+res_df$Significance[res_df$padj < 0.001 & res_df$log2FoldChange < -1] <- "Downregulated"
+  
+important <- subset(res_df,
+                    rownames(res_df) %in% selected_ids)
+
+ggplot(res_df,
+  aes(log2FoldChange, -log10(padj), color = Significance)) +
+  geom_point() +
+  geom_text_repel(data = important,
+                  aes(label = rownames(important)))
+
+# EggNOG annotation
+annot <- read.delim("eggNOGmapper_Canu.emapper.annotations",
+                        comment.char = "#",
+                        header = FALSE)
+  
+colnames(annot) <- c(
+    "query","seed_ortholog","evalue","score","eggNOG_OGs",
+    "max_annot_lvl","COG_category","Description","Preferred_name",
+    "GOs","EC","KEGG_ko","KEGG_Pathway","KEGG_Module",
+    "KEGG_Reaction","KEGG_rclass","BRITE","KEGG_TC",
+    "CAZy","BiGG_Reaction","PFAMs")
+  
+gene_map <- data.frame(
+    gene_id = annot$query,
+    Preferred_name = annot$Preferred_name)
+  
+# Gene-specific analysis (paper genes)
+genes_of_interest <- c("purD","purH","purL","purQ","pyrF","pyrK_2","manY_2")
+
+selected_ids <- gene_map$gene_id[gene_map$Preferred_name %in% genes_of_interest]
+  
+selected_ids <- selected_ids[selected_ids %in% rownames(assay(vsd))]
+  
+pheatmap(assay(vsd)[selected_ids, ],
+           scale = "row",
+           annotation_col = df,
+           main = "Paper genes (nucleotide/carbohydrate metabolism)")
+
+# Histogram - counts per gene distribution
+norm_counts <- counts(dds, normalized=TRUE)
+
+gene_counts <- rowSums(norm_counts)
+
+hist(log10(gene_counts + 1),
+     breaks=50,
+     main="Log10 distribution of gene counts",
+     xlab="log10(counts + 1)",
+     ylab="Number of genes", col = "hotpink")
+
+hist(gene_counts,
+     breaks = 100,
+     main = "Gene count distribution",
+     xlab = "Read counts per gene", col = "hotpink")
+
+# Pheatmap
+select <- order(rowMeans(counts(dds,normalized=TRUE)),
+                decreasing=TRUE)[1:20]
+
+vsd <- vst(dds, blind=FALSE)
+
+select <- order(rowMeans(assay(vsd)),
+                decreasing = TRUE)[1:20]
+
+df <- as.data.frame(colData(dds)[, "condition", drop=FALSE])
+
+pheatmap(assay(vsd)[select,], cluster_rows=FALSE, show_rownames=TRUE,
+         cluster_cols=FALSE, annotation_col=df)
