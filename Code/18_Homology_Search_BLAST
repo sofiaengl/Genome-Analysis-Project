@@ -1,0 +1,27 @@
+#!/bin/bash -l
+
+#SBATCH -A uppmax2026-1-61
+#SBATCH -p pelle
+#SBATCH -c 2
+#SBATCH -t 01:00:00
+#SBATCH -J 18_Homology_Search_BLAST
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user sofia.englundh.7850@student.uu.se
+#SBATCH --output=%x.%j.out
+
+# Load modules
+module load BLAST+/2.17.0-gompi-2024a
+
+# Raw Data
+canu_assembly=/home/soen7850/Genome-Analysis-Project/Analyses/02_Genome_Assembly_and_Annotation/05_Genome_Assembly_Canu_output/efaecium_PacBio_Assembly.contigs.fasta
+
+reference_genome=/home/soen7850/Genome-Analysis-Project/Data/Refrence_Genome/GCF_009734005.1_ASM973400v2_genomic.fna
+
+# Output
+output=/home/soen7850/Genome-Analysis-Project/Analyses/04_Interpretation_and_Visualisation/18_Homology_Search_BLAST_output
+
+# Commands
+makeblastdb -in $canu_assembly -dbtype nucl
+makeblastdb -in $reference_genome -dbtype nucl
+
+blastn -outfmt 6 -db $reference_genome -query $canu_assembly -out $output/blast_results.tab
